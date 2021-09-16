@@ -1,0 +1,521 @@
+---
+title: "Association between estimates of neural drive to the calf muscles and fluctuations in net plantar-flexion (ankle extension) torque across 1-second and 5-second windows of steady 30-s contractions"
+output: pdf
+---
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(reshape2)
+library(lmerTest)
+library(effectsize)
+library(parameters)
+library(MuMIn)
+library(DescTools)
+library(effsize)
+```
+
+```{r}
+# Load data
+  # Data set with 1-s windows used for calculations
+    dat1<-read.csv('PFvecsLong_W1.csv')
+  # Data set with 5-s windows used for calculations
+    dat5<-read.csv('PFvecsLong_W5.csv')
+
+# Replace 0 values with NA
+dat1[dat1==0] <- NA
+dat5[dat5==0] <- NA
+
+# Create index for which trial/contraction number each row is from 
+  # w1 - Each trial has up to 30 1-second windows ("bad windows" with too much noise are excluded)
+    contr <- numeric(length=(228*30))
+    contr <- as.data.frame(contr)
+    
+    for (i in 1:228){
+      startVal <- (30*(i-1))+1
+      endVal <- 30*i
+      contr[startVal:endVal,] <- (rep(i,30))
+    }
+    dat1 <- bind_cols(dat1,contr) 
+  
+  # w5 - Each trial has up to 30 5-second windows ("bad windows" with too much noise are excluded)
+    contr <- numeric(length=(228*6))
+    contr <- as.data.frame(contr)
+    
+    for (i in 1:228){
+      startVal <- (6*(i-1))+1
+      endVal <- 6*i
+      contr[startVal:endVal,] <- (rep(i,6))
+    }
+    dat5 <- bind_cols(dat5,contr) 
+```
+--- ADDITIONAL DATA SETS ---
+```{r}
+# Load additional data sets
+dat30<-read.csv('SingleValsData.csv')
+mucount<-read.csv('MUCounts_Long.csv')
+
+# Count # MUs total
+total <- mucount %>%
+  group_by(subject,day,level,time) %>%
+  summarize(TotalNumMUs = sum(NumMUs)) 
+
+dat <- left_join(total,dat30)
+```
+--- DATA CLEANING & WRANGLING ---
+```{r}
+# Summarize 1-s window data for each contraction
+  dat1 <- na.omit(dat1) 
+  dat1subset <- dat1 %>%
+    group_by(subject,day,level,time) %>%
+    summarize(w1avg_f_cst_r = mean(f_cst_r,na.omit=TRUE), w1avg_f_fpc_r = mean(f_fpc_r,na.omit=TRUE))
+
+alldat <- merge(dat,dat1subset) # Create dataset with data from both window lengths
+
+# summarize 5-s window data for each contraction
+  dat5 <- na.omit(dat5)  
+  dat5subset <- dat5 %>%
+    group_by(subject,day,level,time) %>%
+    summarize(w5avg_f_cst_r = mean(f_cst_r,na.omit=TRUE), w5avg_f_fpc_r = mean(f_fpc_r,na.omit=TRUE))
+
+alldat <- merge(alldat,dat5subset) # Create dataset with data from both window lengths
+
+# Subject 03 dropped from study
+  alldat <- alldat %>%
+    filter(subject != 'SFU03')
+  dat30 <- dat30 %>%
+    filter(subject != 'SFU03')
+  dat <- dat %>%
+    filter(subject != 'SFU03')
+
+# Remove negative values for specific variables
+  alldat <- alldat %>%
+    filter(w30_w1_f_fpc_r > 0)
+  alldat <- alldat %>%
+    filter(w30_w5_f_fpc_r > 0)
+  
+  dat30 <- dat30 %>%
+    filter(w30_w1_f_fpc_r > 0)
+  dat30 <- dat30 %>%
+    filter(w30_w5_f_fpc_r > 0)
+  
+  dat <- dat %>%
+    filter(w30_w1_f_fpc_r > 0)
+  dat <- dat30 %>%
+    filter(w30_w5_f_fpc_r > 0)
+
+
+# Subset by force level
+dat35 <- alldat %>%
+  filter(level =='submax35')
+dat10 <- alldat %>%
+  filter(level =='submax10')
+```
+----- Association between subject and MU number -----
+```{r}
+mod <- lmer(data = alldat, formula = TotalNumMUs ~ subject + (1|level))
+null <- lmer(data = alldat, formula = TotalNumMUs ~ 1 + (1|level))
+anova(mod,null) # Significant main effect of subject
+
+summary(mod)
+```
+
+----- Plot - COMBINED FORCE LEVELS -----
+```{r}
+# Plot - Average from whole 30-s vs windowed cross correlations
+plotdat <- alldat %>%
+  select(subject,level,w30_f_cst_r,w30_w1_f_fpc_r,w30_w5_f_fpc_r,w1avg_f_cst_r,w1avg_f_fpc_r,w5avg_f_cst_r,w5avg_f_fpc_r)
+plotdat <- melt(plotdat)
+
+# Boxplot
+p1 <- ggplot(data = plotdat, aes(x=variable, y=value)) +
+  geom_boxplot(outlier.shape = NA) + 
+  geom_point(position=position_jitter(width=0.15),aes(x=variable, y=value, color = subject,shape = level))
+p1
+```
+
+```{r}
+# Alternative - Dotted violin plot
+p1 <- ggplot(data = plotdat, aes(x=variable, y=value)) +
+  geom_dotplot(aes(fill = subject,color=subject),binaxis='y', stackdir='center', dotsize=0.5)
+p1 # Bins values along y axis - Not perfectly representative of data
+```
+```{r}
+# Alternative - Original violin plot
+
+# Each subject is a different color
+p1 <- ggplot(data = plotdat, aes(x=variable, y=value)) +
+  geom_violin() + geom_boxplot(width = 0.1) + 
+  geom_point(position=position_jitter(width=0.15),aes(x=variable, y=value, color = subject,shape = level)) +
+  stat_summary(fun.y=median, geom="point", size=2, color="black")
+p1
+
+# Each estimate type is a different color
+p2 <- ggplot(data = plotdat, aes(x=variable, y=value)) +
+  geom_violin() + geom_boxplot(width = 0.1) + 
+  geom_point(position=position_jitter(width=0.25),aes(x=variable, y=value, color = variable,shape = level)) +
+  stat_summary(fun.y=median, geom="point", size=2, color="black")
+p2
+```
+----- CHOSEN PLOT STYLE - VIOLIN -----
+```{r}
+# Force level - 10% MVC
+plotdat <- dat10 %>%
+  select(subject,level,w30_f_cst_r,w30_w1_f_fpc_r,w30_w5_f_fpc_r,w1avg_f_cst_r,w1avg_f_fpc_r,w5avg_f_cst_r,w5avg_f_fpc_r)
+plotdat <- melt(plotdat)
+
+# Subjects as different colors
+p1 <- ggplot(data = plotdat, aes(x=variable, y=value)) +
+  geom_violin() + geom_boxplot(width = 0.1) + ggtitle('10% MVC') +
+  geom_point(position=position_jitter(width=0.25),aes(x=variable, y=value, color = subject)) +
+  stat_summary(fun.y=median, geom="point", size=2, color="black")
+p1
+
+# Variables as different colors
+p2 <- ggplot(data = plotdat, aes(x=variable, y=value)) +
+  geom_violin() + geom_boxplot(width = 0.1) + ggtitle('10% MVC') +
+  geom_point(position=position_jitter(width=0.25),aes(x=variable, y=value, color = variable)) +
+  stat_summary(fun.y=median, geom="point", size=2, color="black")
+p2
+```
+
+```{r}
+# Force level - 35%
+plotdat <- dat35 %>%
+  select(subject,level,w30_f_cst_r,w30_w1_f_fpc_r,w30_w5_f_fpc_r,w1avg_f_cst_r,w1avg_f_fpc_r,w5avg_f_cst_r,w5avg_f_fpc_r)
+plotdat <- melt(plotdat)
+
+# Subjects as different colors
+p1 <- ggplot(data = plotdat, aes(x=variable, y=value)) +
+  geom_violin() + geom_boxplot(width = 0.1) + ggtitle('35% MVC') +
+  geom_point(position=position_jitter(width=0.25),aes(x=variable, y=value, color = subject)) +
+  stat_summary(fun.y=median, geom="point", size=2, color="black")
+p1
+
+# Variables as different colors
+p2 <- ggplot(data = plotdat, aes(x=variable, y=value)) +
+  geom_violin() + geom_boxplot(width = 0.1) + ggtitle('35% MVC') +
+  geom_point(position=position_jitter(width=0.25),aes(x=variable, y=value, color = variable)) +
+  stat_summary(fun.y=median, geom="point", size=2, color="black")
+p2
+
+```
+
+----- Rearrange for statistical testing of estimate type and window length as factors ---
+```{r}
+# Step 1
+alldat$contr <- 1:nrow(alldat)
+
+# FPC estimate
+fpcdat <- alldat %>%
+  select(w30_w1_f_fpc_r,w30_w5_f_fpc_r,w1avg_f_fpc_r,w5avg_f_fpc_r,contr,level) %>%
+  mutate(type <- 'fpc')
+  colnames(fpcdat)[7] <- 'type'
+fpcdat2 <- fpcdat %>%
+  pivot_longer(cols = c(w30_w1_f_fpc_r,w30_w5_f_fpc_r,w1avg_f_fpc_r,w5avg_f_fpc_r),names_to = 'variables',values_to = 'value')
+
+# CST estimate
+cstdat <- alldat %>%
+  select(w30_f_cst_r,w1avg_f_cst_r,w5avg_f_cst_r,contr,level) %>%
+  mutate(type <- 'cst') 
+  colnames(cstdat)[6] <- 'type'
+cstdat2 <- cstdat %>%
+  pivot_longer(cols = c(w30_f_cst_r,w1avg_f_cst_r,w5avg_f_cst_r),names_to = 'variables',values_to = 'value')
+
+# Data set with factors for type of neural drive estimate
+typedat <- rbind(fpcdat2,cstdat2)
+```
+
+```{r}
+# Step 2
+alldat$contr <- 1:nrow(alldat)
+# FPC
+fpcdat <- alldat %>%
+  select(w30_w1_f_fpc_r,w30_w5_f_fpc_r,w1avg_f_fpc_r,w5avg_f_fpc_r,contr,subject,level) %>%
+  mutate(type <- 'fpc')
+  colnames(fpcdat)[8] <- 'type'
+fpcdat2 <- fpcdat %>%
+  pivot_longer(cols = c(w30_w1_f_fpc_r,w30_w5_f_fpc_r,w1avg_f_fpc_r,w5avg_f_fpc_r),names_to = 'variables',values_to = 'value')
+
+for (i in 1:nrow(fpcdat2)){
+ temp <- fpcdat2$variables[i]
+ strs <- str_split(temp,'_')
+   if (length(strs[1]) == 3){
+   fpcdat2$window[i] <- strs[[1]][1]}
+   else{
+   temp <- str_split(strs[[1]][1],'a')
+   fpcdat2$window[i] <- temp[[1]][1]
+   }
+}
+
+# CST
+cstdat <- alldat %>%
+  select(w30_f_cst_r,w1avg_f_cst_r,w5avg_f_cst_r,contr,subject,level) %>%
+  mutate(type <- 'cst')
+  colnames(cstdat)[7] <- 'type'
+cstdat2 <- cstdat %>%
+  pivot_longer(cols = c(w30_f_cst_r,w1avg_f_cst_r,w5avg_f_cst_r),names_to = 'variables',values_to = 'value')
+
+for (i in 1:nrow(cstdat2)){
+ temp <- cstdat2$variables[i]
+ strs <- str_split(temp,'_')
+   if (length(strs[1]) == 3){
+   cstdat2$window[i] <- strs[[1]][1]}
+   else{
+   temp <- str_split(strs[[1]][1],'a')
+   cstdat2$window[i] <- temp[[1]][1]
+   }
+}
+
+typedat <- rbind(fpcdat2,cstdat2)
+```
+
+
+------------- BOTH FORCE LEVELS POOLED ------------------
+
+```{r}
+# Interaction effects !
+
+# Interaction effect between window length and estimate type
+null <- lmer(data = typedat,formula = value ~ type*window  + (1|contr) + (1|level) + (1|subject))
+mod <- lmer(data = typedat,formula = value ~ type + window + (1|contr) + (1|level) + (1|subject))
+anova(null,mod)
+#      npar     AIC     BIC logLik deviance  Chisq Df Pr(>Chisq)    
+# mod     7 -2938.1 -2901.2 1476.0  -2952.1                         
+# null   10 -3018.4 -2965.8 1519.2  -3038.4 86.303  3  < 2.2e-16 ***
+
+# Interaction effect between estimate type and target torque level
+null <- lmer(data = typedat,formula = value ~ type*level + (1|window) + (1|contr)  + (1|subject))
+mod <- lmer(data = typedat,formula = value ~ type + level + (1|contr) + (1|window) + (1|subject))
+anova(null,mod)
+#      npar     AIC     BIC logLik deviance  Chisq Df Pr(>Chisq)    
+# mod     7 -2939.7 -2902.9 1476.9  -2953.7                         
+# null    8 -2956.1 -2914.0 1486.0  -2972.1 18.318  1  1.869e-05 ***
+
+
+# Interaction effect between window length and target torque level
+null <- lmer(data = typedat,formula = value ~ window*level + (1|type) + (1|contr)  + (1|subject))
+mod <- lmer(data = typedat,formula = value ~ window + level + (1|contr) + (1|type) + (1|subject))
+anova(null,mod)
+#      npar     AIC     BIC logLik deviance  Chisq Df Pr(>Chisq)  
+# mod     8 -2944.4 -2902.4 1480.2  -2960.4                       
+# null   10 -2947.0 -2894.4 1483.5  -2967.0 6.5201  2    0.03839 *
+```
+
+```{r}
+# LME Model - Main effect of type (CST or FPC) of estimate? - NO
+summary(lmer(data = typedat,formula = value~type + (1|level) + (1|contr) + (1|window) + (1|subject)))
+
+```
+
+```{r}
+# LME Model -  Main effect of target torque - YES
+summary(lmer(data = typedat,formula = value~level + (1|type) + (1|window) + (1|subject)))
+
+null <- lmer(data = typedat,formula = value ~ 1 + (1|type) + (1|window) + (1|subject))
+mod <- lmer(data = typedat,formula = value ~ level + (1|type) + (1|window) + (1|subject))
+anova(null,mod)
+
+parameters::model_parameters(lmer(data = typedat,formula = value ~ level + (1|type) + (1|window) + (1|subject)), effects = "fixed", df_method = "satterthwaite",ci_digits = 4)
+
+    t_to_eta2(  t = 3.15,df_error = 1400.13)
+
+    r.squaredGLMM(lmer(data = typedat,formula = value ~ level + (1|type) + (1|window) + (1|subject)))
+
+    
+```
+
+```{r}
+# LME Model - Main effect of window length - YES
+summary(lmer(data = typedat,formula = value~window + (1|type) + (1|level) + (1|subject)))
+
+null <- lmer(data = typedat,formula = value~1 + (1|type) + (1|level) + (1|subject))
+mod <- lmer(data = typedat,formula = value~window + (1|type) + (1|level) + (1|subject))
+anova(null,mod)
+
+parameters::model_parameters(lmer(data = typedat,formula = value~window + (1|type) + (1|level) + (1|subject)), effects = "fixed", df_method = "satterthwaite",ci_digits = 4)
+
+    t_to_eta2(  t = 2.17,df_error = 1400.03)
+
+    r.squaredGLMM(lmer(data = typedat,formula = value~window + (1|type) + (1|level) + (1|subject)))
+    
+```
+--- FPC Data - Analyse by window length as factor ---
+```{r}
+# Insert numeric values for window length
+fpcdat2 <- fpcdat2 %>%
+  mutate(window_num = case_when(
+         window == "w1" ~ 1,
+         window == "w5" ~ 2,
+         window =="w30" ~ 3))
+
+# FPC - Main effect of window length - YES
+summary(lmer(data = fpcdat2,formula = value ~ window_num + (1|contr) + (1|subject)))
+   
+null <- lmer(data = fpcdat2,formula = value ~ 1 + (1|contr) + (1|subject))
+mod <- lmer(data = fpcdat2,formula = value ~ window_num + (1|contr) + (1|subject))
+anova(null,mod)
+
+parameters::model_parameters(lmer(data = fpcdat2,formula = value ~ window_num + (1|contr) + (1|subject)), effects = "fixed", df_method = "satterthwaite",ci_digits = 4)
+
+    t_to_eta2(  t = -4.04,df_error = 522.58)
+
+    r.squaredGLMM(lmer(data = fpcdat2,formula = value ~ window_num + (1|contr) + (1|subject)))
+
+    # Post-hoc pairwise testing
+      DunnettTest(fpcdat2$value,as.factor(fpcdat2$window_num))
+  
+      comp1_30 <- fpcdat2[which(fpcdat2$window_num != 2),]
+      comp1_30 <- na.omit(comp1_30)
+          cohen.d(comp1_30$value,comp1_30$window_num)
+  
+      comp1_5 <- fpcdat2[which(fpcdat2$window_num != 3),]
+      comp1_5 <- na.omit(comp1_5)
+         cohen.d(comp1_5$value,comp1_5$window_num)
+
+```
+
+```{r}
+# LME Model - FPC - Main effect of target torque level - NO
+null <- lmer(data = fpcdat2,formula = value ~ level + (1|window) + (1|subject))
+mod <- lmer(data = fpcdat2,formula = value ~ 1 + (1|window) + (1|subject))
+anova(null,mod)
+
+```
+--- CST Data - Analyse by window length as factor ---
+```{r}
+# Insert numeric values for window length
+cstdat2 <- cstdat2 %>%
+  mutate(window_num = case_when(
+         window == "w1" ~ 1,
+         window == "w5" ~ 2,
+         window =="w30" ~ 3))
+
+# CST - Main effect of window length - YES
+summary(lmer(data = cstdat2,formula = value ~ window_num + (1|contr) + (1|subject)))
+
+null <- lmer(data = cstdat2,formula = value ~ 1 + (1|contr) + (1|subject))
+mod <- lmer(data = cstdat2,formula = value ~ window_num + (1|contr) + (1|subject))
+anova(null,mod)
+
+parameters::model_parameters(lmer(data = cstdat2,formula = value ~ window_num + (1|contr) + (1|subject)), effects = "fixed", df_method = "satterthwaite",ci_digits = 4)
+
+    t_to_eta2(  t = 8.92,df_error = 321.24)
+    
+    r.squaredGLMM(lmer(data = cstdat2,formula = value ~ window_num + (1|contr) + (1|subject)))
+
+    # Pairwise post-hoc testing
+    DunnettTest(cstdat2$value,cstdat2$window_num)
+    cohen.d(na.omit(cstdat2$value),na.omit(cstdat2$window_num))
+
+```
+
+```{r}
+# LME Model - CST - Main effect of target torque level - YES
+
+summary(lmer(data = cstdat2,formula = value ~ level + (1|window) + (1|subject)))
+
+null <- lmer(data = cstdat2,formula = value ~ 1 + (1|window) + (1|subject))
+mod <- lmer(data = cstdat2,formula = value ~ level + (1|window) + (1|subject))
+anova(null,mod)
+
+parameters::model_parameters(lmer(data = cstdat2,formula = value ~ level + (1|window) + (1|subject)), effects = "fixed", df_method = "satterthwaite",ci_digits = 4)
+
+    t_to_eta2(  t = 4.04,df_error = 588.39)
+
+    r.squaredGLMM(lmer(data = cstdat2,formula = value ~ level + (1|window) + (1|subject)))
+
+    # Pairwise post-hoc testing
+    DunnettTest(cstdat2$value,as.factor(cstdat2$level))
+    cohen.d(na.omit(cstdat2$value),na.omit(as.factor(cstdat2$level)))
+
+```
+--- Pairwise comparison between estimate type ---
+```{r}
+# Pairwise comparison between FPC and CST for each window length
+w30dat <- typedat[which(typedat$window == 'w30'),]
+w5dat <- typedat[which(typedat$window == 'w5'),]
+w1dat <- typedat[which(typedat$window == 'w1'),]
+
+# Post-hoc tests based on original LMER model earlier in script
+# **** MULTIPLY BY 3 FOR MULTIPLE COMPARISONS *****
+
+DunnettTest(w30dat$value,as.factor(w30dat$type))
+
+DunnettTest(w5dat$value,as.factor(w5dat$type))
+
+DunnettTest(w1dat$value,as.factor(w1dat$type))
+    w1dat <- na.omit(w1dat)
+    cohen.d(w1dat$value,as.factor(w1dat$type))
+
+```
+
+------------- Median & SD for whole contraction / averages -------------
+```{r}
+# Calculate Median and SD for manuscript reporting - Separate torque levels
+dat10 %>%
+  summarize(median(w1avg_f_cst_r,na.rm=TRUE),sd(w1avg_f_cst_r,na.rm=TRUE))
+
+dat35 %>%
+  summarize(median(w1avg_f_cst_r,na.rm=TRUE),sd(w1avg_f_cst_r,na.rm=TRUE))
+
+typedat %>%
+  group_by(type) %>%
+  summarize(median(value,na.rm=TRUE),sd(value,na.rm=TRUE))
+
+```
+------------- % Explained by FPC estimate ----------------
+```{r}
+# FPC
+expdat <- alldat %>%
+  select(w1_expl_max_mean,w5_expl_max_mean,contr,subject,level)
+expdat2 <- expdat %>%
+  pivot_longer(cols = c(w1_expl_max_mean,w5_expl_max_mean),names_to = 'variables',values_to = 'value')
+
+for (i in 1:nrow(expdat2)){
+ temp <- expdat2$variables[i]
+ strs <- str_split(temp,'_')
+   if (length(strs[1]) == 3){
+   expdat2$window[i] <- strs[[1]][1]}
+   else{
+   temp <- str_split(strs[[1]][1],'a')
+   expdat2$window[i] <- temp[[1]][1]
+   }
+}
+
+```
+
+```{r}
+# Main effect of target torque level? - YES
+mod <- lmer(data =expdat2,formula = value ~ level + (1|window) + (1|subject) + (1|contr))
+null <- lmer(data =expdat2,formula = value ~ 1 + (1|window) + (1|subject)+ (1|contr))
+anova(mod,null)
+
+# Interaction effect between target torque level and window length? - NO
+mod <- lmer(data =expdat2,formula = value ~ level*window + (1|subject) + (1|contr))
+null <- lmer(data =expdat2,formula = value ~ level + window + (1|subject)+ (1|contr))
+anova(mod,null)
+
+# Main effect of window length? - YES
+mod <- lmer(data =expdat2,formula = value ~ window + (1|level) + (1|subject) + (1|contr))
+null <- lmer(data =expdat2,formula = value ~ 1 + (1|level) + (1|subject)+ (1|contr))
+anova(mod,null)
+
+summary(mod)
+
+parameters::model_parameters((mod), effects = "fixed", df_method = "satterthwaite",ci_digits = 4)
+
+    t_to_eta2(  t = 33,df_error = 202)
+
+    r.squaredGLMM(mod)
+
+```
+--- Summarize % Explaine dby FPC for manuscript reporting ---
+```{r}
+alldat %>%
+  summarize(median(w1_expl_max_mean),sd(w1_expl_max_mean))
+
+alldat %>%
+  group_by(level) %>%
+  summarize(median(w5_expl_max_mean),sd(w5_expl_max_mean))
+```

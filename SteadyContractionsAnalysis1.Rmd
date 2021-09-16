@@ -1,0 +1,271 @@
+---
+title: "Association between estimates of neural drive to the calf muscles and fluctuations in net plantar-flexion (ankle extension) torque across entire 30-s steady contractions"
+output: html
+---
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(plotly)
+library(gridExtra)
+library(lme4)
+library(MuMIn)
+
+# Load datasets
+dat<-read.csv('SingleValsData.csv')
+dat2<-read.csv('MUCounts_Long.csv')
+
+# Calculate number of motor units (MUs) total for each trial
+# based on recordings from three different calf muscles
+dat2 <- dat2 %>%
+  group_by(subject,day,level,time) %>%
+  summarize(TotalNumMUs = sum(NumMUs)) 
+
+alldat <- left_join(dat2,dat)
+
+# Subject 03 was dropped from the study
+alldat <- alldat %>%
+  filter(subject != 'SFU03')
+
+# Remove negative values for certain variables
+alldat <- alldat %>%
+  filter(w30_w1_f_fpc_r > 0)
+alldat <- alldat %>%
+  filter(w30_w5_f_fpc_r > 0)
+
+# Subset force levels for separate statistical analysis later
+dat35 <- alldat %>%
+  filter(level =='submax35')
+dat10 <- alldat %>%
+  filter(level =='submax10')
+
+```
+--- COMPARING CROSS CORRELATION VALUES BETWEEN 2 ESTIMATES OF NEURAL DRIVE AND TORQUE ---
+```{r}
+# PLOT - Cross correlations between two estimates of neural drive and fluctuations in torque
+# CST x force VS fpc x force correlation
+p1_w1 <- ggplot(data = alldat,aes(y = w30_f_cst_r,x = w30_w1_f_fpc_r,color = level)) +
+  geom_point(aes(color = level),alpha=0.5) + theme_classic() + ggtitle('30-s CST and 30-s (1-s) FPC')
+p1_w5 <- ggplot(data = alldat,aes(y = w30_f_cst_r,x = w30_w5_f_fpc_r,color = level)) +
+  geom_point(aes(color = level), alpha=0.5) + theme_classic() + ggtitle('30-s CST and 30-s (5-s) FPC')
+grid.arrange(p1_w1,p1_w5,ncol=2)
+```
+
+```{r}
+# Linear mixed effects models to assess the main association between the two variables with random intercepts included for force level and subject
+
+# Statistics for plot on the right (w30 - w5)
+mod <- lmer(na.omit(alldat), formula = w30_f_cst_r ~ w30_w5_f_fpc_r + (1|level) + (1|subject))
+null <- lmer(na.omit(alldat), formula = w30_f_cst_r ~ 1 + (1|level) + (1|subject))
+anova(mod,null)
+
+summary(lmer(na.omit(alldat),formula = w30_f_cst_r ~ w30_w5_f_fpc_r + (1|level) + (1 | subject)))
+
+r.squaredGLMM(lmer(data = na.omit(alldat),formula = w30_f_cst_r ~ w30_w5_f_fpc_r + (1|level) + (1 | subject)))
+
+```
+--- DEPENDENCE OF THE CROSS CORRELATION VALUES ON NUMBER OF MOTOR UNITS ---
+```{r}
+# PLOT - CST vs Force & number of units
+p1 <- ggplot(data = alldat, aes(x=TotalNumMUs, y=w30_f_cst_r, color = level, group=level)) +
+  geom_point(aes(x=TotalNumMUs, y=w30_f_cst_r, color=level)) + 
+  geom_smooth(method='lm',formula=y~x)
+
+p1
+```
+
+```{r}
+# Linear mixed effects models to quantify whether the association is significant at each force level
+
+# Force Level - 10% MVC (MVC = maximum voluntary contraction / calf muscle strength)
+mod <- lmer(data = dat10, formula = TotalNumMUs ~ w30_f_cst_r + (1|subject))
+null <- lmer(data = dat10, formula = TotalNumMUs ~ 1 + (1|subject))
+anova(mod,null)
+
+summary(mod) # Not a significant association between variables
+
+# Force Level - 35% MVC
+mod <- lmer(data = dat35, formula = TotalNumMUs~w30_f_cst_r + (1|subject))
+null <- lmer(data = dat35, formula = TotalNumMUs ~ 1 + (1|subject))
+anova(null,mod)
+
+summary(mod) # Significant association at 35% MVC
+
+parameters::model_parameters(mod, effects = "fixed", df_method = "satterthwaite",ci_digits = 4)
+
+    t_to_eta2(t = 4.48, df_error = 91.5)
+
+    r.squaredGLMM(mod)
+    
+```
+--- CROSS CORRELATION BETWEEN NEURAL DRIVE ESTIMATES AND FLUCTUATIONS IN TORQUE AT EACH FORCE LEVEL ---
+```{r}
+# PLOT - Xcorr with force boxplot - W1 or W5
+
+# Two estimates of neural drive
+p1 <- ggplot(data = alldat,aes(y = w30_w5_fpc_cst_r,x=level,color = level)) +
+  geom_violin(aes(group = level),outlier.shape = NA) + theme(legend.position = "none") +
+    geom_point(position=position_jitter(width=0.15),aes(x = level)) +
+  stat_summary(fun.y=median,aes(x=level),geom="point", shape=20, size=4, color="black", position=position_dodge(.25), fill="red") + ylim(0,1) + ggtitle('CST x FPC')
+
+# FPC estimate of neural drive vs torque
+p2 <- ggplot(data = alldat,aes(y = w30_w1_f_fpc_r,x=level,color = level)) +
+  geom_violin(aes(group = level),outlier.shape = NA) + theme(legend.position = "none") +
+    geom_point(position=position_jitter(width=0.15),aes(x = level)) +
+  stat_summary(fun.y=median,aes(x=level),geom="point", shape=20, size=4, color="black", position=position_dodge(.25), fill="red") + ylim(0,1) + ggtitle('Force x FPC')
+
+# CST estimate of neural drive vs torque
+p3 <- ggplot(data = alldat,aes(y = w30_f_cst_r,x=level,color = level)) +
+  geom_violin(aes(group = level),outlier.shape = NA) + theme(legend.position = "none") +
+    geom_point(position=position_jitter(width=0.15),aes(x = level)) +
+  stat_summary(fun.y=median,aes(x=level),geom="point", shape=20, size=4, color="black", position=position_dodge(.25), fill="red") + ylim(0,1) + ggtitle('Force x CST')
+
+grid.arrange(p1,p2,p3,ncol=3)
+```
+```{r}
+# Linear mixed effects models to assess the effect of torque level on the cross correlation values
+
+# CST x Torque cross correlation
+mod <- lmer(data = alldat, formula = w30_f_cst_r ~ level + (1|subject),REML = FALSE)
+null <- lmer(data = alldat, formula = w30_f_cst_r ~ 1 + (1|subject),REML = FALSE)
+anova(mod,null)
+
+summary(mod) # No significant main effect of torque level on CST x Torque cross correlation strength
+
+
+# FPC (1-s) x Torque cross correlation
+mod <- lmer(data = alldat, formula = w30_w1_f_fpc_r ~ level + (1|subject),REML = FALSE)
+null <- lmer(data = alldat, formula = w30_w1_f_fpc_r ~ 1 + (1|subject),REML = FALSE)
+anova(mod,null)
+
+summary(mod) # No significant main effect of torque level on FPC (1-s) x Torque cross correlation strength
+
+
+# FPC (5-s) x Torque cross correlation
+mod <- lmer(data = alldat, formula = w30_w5_f_fpc_r ~ level + (1|subject), REML = FALSE)
+null <- lmer(data = alldat, formula = w30_w5_f_fpc_r ~ 1 + (1|subject),REML = FALSE)
+anova(mod,null)
+
+summary(mod) # No significant main effect of torque level on FPC (5-s) x Torque cross correlation strength
+
+```
+
+```{r}
+# Quick look at lowest values for the FPC x Torque cross correlation
+alldat %>%
+  select(subject,day,level,time,w30_w5_f_fpc_r) %>%
+  filter(level =='submax35') %>%
+  arrange(w30_w5_f_fpc_r)
+
+# And for the CST x Torque cross correlation
+alldat %>%
+  select(subject,day,level,time,w30_f_cst_r) %>%
+  filter(level =='submax35') %>%
+  arrange(w30_f_cst_r)
+```
+--- VARIABILITY IN NEURAL DRIVE AND TORQUE ---
+```{r}
+# Load additional data set with values for maximal calf strength ("MVC")
+mvcdat<- read.csv('MVCdat.csv')
+
+alldat <- left_join(alldat,mvcdat,by=c("subject","day"))
+dat10 <- left_join(dat10,mvcdat,by=c("subject","day"))
+dat35 <- left_join(dat35,mvcdat,by=c("subject","day"))
+
+# Convert the standard deviation in force signal (N) to % MVC (% of maximum strength)
+alldat <- alldat %>%
+  mutate(f_sd_per = f_sd/mvc_N)
+dat10 <- dat10 %>%
+  mutate(f_sd_per = f_sd/mvc_N)
+dat35 <- dat35 %>%
+  mutate(f_sd_per = f_sd/mvc_N)
+```
+--- SD FOR TORQUE VS CROSS CORRELATION STRENGTH ---
+```{r}
+# PLOT - Torque Level - 10% MVC
+# SD for torque/force as % MVC compared to cross correlation strength
+p <- ggplot(data = dat10,aes(x = f_sd_per,y = w30_f_cst_r,color = level)) +
+  geom_point(aes(color=subject)) + geom_smooth(method='lm', formula= y~x)
+p
+
+# Quick linear model
+summary(lm(data=dat10,f_sd_per~w30_f_cst_r)) # Not a significant association
+```
+
+```{r}
+# PLOT - Torque Level - 35% MVC
+# SD for torque/force as % MVC compared to cross correlation strength
+p <- ggplot(data = dat35,aes(x = f_sd_per,y = w30_f_cst_r)) +
+  geom_point(aes(color=subject)) + geom_smooth(method='lm', formula= y~x)
+p
+
+summary(lm(data=dat35,f_sd_per~w30_f_cst_r)) # Significant association
+# Trials with smaller fluctuations in torque had stronger cross correlations between neural drive and resultant torque
+
+```
+--- VARIABILITY IN NEURAL DRIVE AND VARIABILITY IN TORQUE ---
+```{r}
+# SD for Force vs SD for CST
+p <- ggplot(data = alldat, aes(x=f_sd_per, y=cst_sd, color = level, group=level)) +
+  geom_point(aes(x=f_sd_per, y=cst_sd, color=level))
+p
+
+p1 <- ggplot(data = alldat, aes(x=TotalNumMUs, y=w30_f_cst_r, color = level, group=level)) +
+  geom_point(aes(x=TotalNumMUs, y=w30_f_cst_r, color=level))+ 
+  geom_smooth(method='lm',formula=y~x)
+
+summary(lm(data = dat10, formula = f_sd_per~cst_sd))
+summary(lm(data = dat35, formula = f_sd_per~cst_sd))
+```
+
+--- INFLUENCE OF MOTOR UNIT NUMBER ON VARIABILITY ---
+```{r} 
+# Does the association change if the amount of variability in neural drive is normalized to the number of motor units included in the analysis?
+alldat <- alldat %>%
+  mutate(cst_sd_norm = cst_sd/TotalNumMUs)
+dat10 <- dat10 %>%
+  mutate(cst_sd_norm = cst_sd/TotalNumMUs)
+dat35 <- dat35 %>%
+  mutate(cst_sd_norm = cst_sd/TotalNumMUs)
+
+alldat <- alldat %>%
+  mutate(w5_fpc_sd_norm = w5_fpc_sd/TotalNumMUs)
+dat10 <- dat10 %>%
+  mutate(w5_fpc_sd_norm = w5_fpc_sd/TotalNumMUs)
+dat35 <- dat35 %>%
+  mutate(w5_fpc_sd_norm = w5_fpc_sd/TotalNumMUs)
+```
+```{r}
+# Plots & Summary Models - Torque Level - 10% MVC
+# Force vs SD CST estimate of neural drive
+p10_cst_f <- ggplot(data = dat10, aes(y=cst_sd_norm, x=f_sd_per)) +
+  geom_point(aes(y=cst_sd_norm, x=f_sd_per,color=subject)) + 
+  geom_smooth(method='lm',formula=y~x) + theme(legend.position='none')
+summary(lm(data=dat10,cst_sd_norm~f_sd_per))
+
+# SD FPC estimate of neural drive vs SD CST estimate of neural drive
+p10_cst_fpc <- ggplot(data = dat10, aes(y=cst_sd_norm, x=w5_fpc_sd)) +
+  geom_point(aes(y=cst_sd_norm, x=w5_fpc_sd,color=subject)) + 
+  geom_smooth(method='lm',formula=y~x) + theme(legend.position='none')
+summary(lm(data=dat10,cst_sd_norm~w5_fpc_sd))
+
+grid.arrange(p10_cst_f,p10_cst_fpc,ncol=2)
+```
+```{r}
+# Plots & Summary Models - Torque Level - 35% MVC
+# Force vs SD CST estimate of neural drive
+p35_cst_f <- ggplot(data = dat35, aes(y=cst_sd_norm, x=f_sd_per)) +
+  geom_point(aes(y=cst_sd_norm, x=f_sd_per,color=subject)) + 
+  geom_smooth(method='lm',formula=y~x) + theme(legend.position='none')
+
+summary(lm(data=dat35,cst_sd_norm~f_sd_per))
+
+# SD FPC estimate of neural drive vs SD CST estimate of neural drive
+p35_cst_fpc <- ggplot(data = dat35, aes(y=cst_sd_norm, x=w5_fpc_sd)) +
+  geom_point(aes(y=cst_sd_norm, x=w5_fpc_sd,color=subject)) + 
+  geom_smooth(method='lm',formula=y~x) + theme(legend.position='none')
+
+summary(lm(data=dat35,cst_sd_norm~w5_fpc_sd))
+
+grid.arrange(p35_cst_f,p35_cst_fpc,ncol=2)
+```
